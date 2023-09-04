@@ -195,7 +195,7 @@ class GPT(nn.Module):
             dim=-1,
         )
         # eps_comb = self.transformer.eps_drop(eps_embs)
-        x = torch.cat([tok_emb + pos_emb, eps_comb], dim=1)
+        x = torch.cat([tok_emb + pos_emb, eps_comb], dim=-1)
 
         # x = tok_emb + pos_emb
 
