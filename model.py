@@ -123,7 +123,7 @@ class GPT(nn.Module):
         assert config.block_size is not None
         self.config = config
         self.pad = 8
-        self.extra_emb = ((self.pad * 5) + (self.pad * 4))
+        self.extra_emb = ((self.pad * 4) + (self.pad * 4))
         r = config.n_embd - self.extra_emb
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, r),
