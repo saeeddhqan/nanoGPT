@@ -122,7 +122,7 @@ class GPT(nn.Module):
         assert config.vocab_size is not None
         assert config.block_size is not None
         self.config = config
-        self.pad = 2
+        self.pad = 4
         self.extra_emb = ((self.pad * 4) + (self.pad * 4))
         r = config.n_embd - self.extra_emb
         self.transformer = nn.ModuleDict(dict(
