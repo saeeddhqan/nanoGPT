@@ -143,7 +143,7 @@ class GPT(nn.Module):
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
         # not 100% sure what this is, so far seems to be harmless. TODO investigate
-        self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
+        # self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
         # init all weights
         self.apply(self._init_weights)
@@ -194,7 +194,6 @@ class GPT(nn.Module):
             eps_pos_embs.view(1, t, -1).expand(b, t, -1)],
             dim=-1,
         )
-        tok_emb + pos_emb
         # eps_comb = self.transformer.eps_drop(eps_embs)
         x = torch.cat([tok_emb + pos_emb, eps_comb], dim=-1)
 
