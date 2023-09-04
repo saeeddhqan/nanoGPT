@@ -82,7 +82,7 @@ class MLP(nn.Module):
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
         self.gelu    = nn.GELU()
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
-        self.bias    = nn.Linear(config.n_embd, config.n_embd)
+        self.bias    = nn.Parameters(torch.ones(1, 1, config.n_embd))
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
@@ -90,7 +90,7 @@ class MLP(nn.Module):
         y = self.gelu(y)
         y = self.c_proj(y)
         x = x * y
-        x = x + self.bias(x)
+        x = x + self.bias
         x = self.dropout(x)
         return x
 
