@@ -126,8 +126,8 @@ class GPT(nn.Module):
         self.extra_emb = ((self.pad * 4) + (self.pad * 4))
         r = config.n_embd - self.extra_emb
         self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(config.vocab_size, config.n_embd),
-            wpe = nn.Embedding(config.block_size, config.n_embd),
+            wte = nn.Embedding(config.vocab_size, r),
+            wpe = nn.Embedding(config.block_size, r),
             eps_embs = nn.Embedding(config.vocab_size + 1, 4),
             eps_pos_embs = nn.Embedding(config.block_size, 4),
             drop = nn.Dropout(config.dropout),
