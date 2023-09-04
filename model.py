@@ -82,14 +82,13 @@ class MLP(nn.Module):
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
         self.gelu    = nn.GELU()
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=True)#bias=config.bias)
-        self.bias    = nn.Parameter(torch.zeros(1, 1, config.n_embd))
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
         y = self.c_fc(x)
         y = self.gelu(y)
         y = self.c_proj(y)
-        x = (x * y) + self.bias
+        x = (x * y) + y
         x = self.dropout(x)
         return x
 
@@ -124,7 +123,7 @@ class GPT(nn.Module):
         assert config.vocab_size is not None
         assert config.block_size is not None
         self.config = config
-        self.pad = 16
+        self.pad = 32
         self.extra_emb = ((self.pad * 2) * 2)
         r = config.n_embd - self.extra_emb
         # r = config.n_embd
