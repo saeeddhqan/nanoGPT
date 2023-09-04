@@ -304,6 +304,11 @@ while True:
     if grad_clip != 0.0:
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+    if (max_iters // 2) <= iter_num:
+        ratio = 0.1 * loss
+        for param in model.parameters():
+            if param.grad is not None:
+                param.grad *= ratio
     # step the optimizer and scaler if training in fp16
     scaler.step(optimizer)
     scaler.update()
