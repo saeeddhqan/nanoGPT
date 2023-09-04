@@ -305,7 +305,7 @@ while True:
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
     if (max_iters // 3) <= iter_num:
-        ratio = 0.5 * loss
+        ratio = 1 + (0.1 * loss)
         for param in model.parameters():
             if param.grad is not None:
                 param.grad *= ratio
