@@ -122,10 +122,14 @@ class GPT(nn.Module):
         assert config.vocab_size is not None
         assert config.block_size is not None
         self.config = config
+		self.pad = 15
+		self.extra_emb = ((self.pad * 5) + (self.pad * 4))
 
         self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(config.vocab_size, config.n_embd),
-            wpe = nn.Embedding(config.block_size, config.n_embd),
+            wte = nn.Embedding(config.vocab_size, config.n_embd - self.extra_emb),
+            wpe = nn.Embedding(config.block_size, config.n_embd - self.extra_emb),
+            eps_embs = nn.Embedding(config.vocab_size + 1, 5),
+			eps_pos_embs = nn.Embedding(config.block_size, 4),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
@@ -176,7 +180,19 @@ class GPT(nn.Module):
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)
+
+		xseq = F.pad(idx + 1, (self.pad, 0)).unfold(1, self.pad, 1)[:,:-1,:]
+		bseq = F.pad(pos, (self.pad, 0)).unfold(0, self.pad, 1)[1:,:]
+		eps_embs = self.transformer.eps_embs(xseq)
+		eps_pos_embs = self.transformer.eps_pos_embs(bseq)
+		eps_comb = torch.cat([
+			eps_embs.view(B, T, -1),
+			eps_pos_embs.view(1, T, -1).expand(B, T, -1)],
+			dim=-1,
+		)
+		x = torch.cat([tok_emb + pos_emb, eps_comb], dim=-1)
+
+        x = self.transformer.drop(x)
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
