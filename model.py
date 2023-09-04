@@ -128,7 +128,7 @@ class GPT(nn.Module):
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, r),
             wpe = nn.Embedding(config.block_size, r),
-            eps_embs = nn.Embedding(config.vocab_size + 1, 5),
+            eps_embs = nn.Embedding(config.vocab_size + 1, 4),
             eps_pos_embs = nn.Embedding(config.block_size, 4),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
