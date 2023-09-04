@@ -186,8 +186,8 @@ class GPT(nn.Module):
         eps_embs = self.transformer.eps_embs(xseq)
         eps_pos_embs = self.transformer.eps_pos_embs(bseq)
         eps_comb = torch.cat([
-            eps_embs.view(B, T, -1),
-            eps_pos_embs.view(1, T, -1).expand(B, T, -1)],
+            eps_embs.view(b, t, -1),
+            eps_pos_embs.view(1, t, -1).expand(b, t, -1)],
             dim=-1,
         )
         x = torch.cat([tok_emb + pos_emb, eps_comb], dim=-1)
