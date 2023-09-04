@@ -82,12 +82,15 @@ class MLP(nn.Module):
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
         self.gelu    = nn.GELU()
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        self.bias    = nn.Linear(config.n_embd, config.n_embd)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
-        x = self.c_fc(x)
-        x = self.gelu(x)
-        x = self.c_proj(x)
+        y = self.c_fc(x)
+        y = self.gelu(y)
+        y = self.c_proj(y)
+        x = x * y
+        x = x + self.bias(x)
         x = self.dropout(x)
         return x
 
@@ -130,6 +133,7 @@ class GPT(nn.Module):
             wpe = nn.Embedding(config.block_size, r),
             eps_embs = nn.Embedding(config.vocab_size + 1, 4),
             eps_pos_embs = nn.Embedding(config.block_size, 4),
+            eps_drop = nn.Dropout(config.dropout),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
@@ -190,6 +194,7 @@ class GPT(nn.Module):
             eps_pos_embs.view(1, t, -1).expand(b, t, -1)],
             dim=-1,
         )
+        eps_comb = self.transformer.eps_drop(eps_comb)
         x = torch.cat([tok_emb + pos_emb, eps_comb], dim=-1)
 
         # x = tok_emb + pos_emb

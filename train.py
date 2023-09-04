@@ -259,7 +259,6 @@ while True:
     if iter_num % eval_interval == 0 and master_process:
         losses = estimate_loss()
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-        ratio = losses['val']
         if wandb_log:
             wandb.log({
                 "iter": iter_num,
@@ -304,20 +303,7 @@ while True:
     if grad_clip != 0.0:
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-    if (max_iters // 3) <= iter_num:
-        factor = 1 + (0.1 * ratio)
-        # shock = 1 - (losses['train'] / losses['val'])
-        # factor += shock
-        for param in model.parameters():
-            if param.grad is not None:
-                param.grad *= factor
-    if (max_iters // 2) <= iter_num:
-        shock = (1 - (losses['train'] / losses['val']))
-        if shock > 0.2:
-            shock = 5
-        for param in model.parameters():
-            if param.grad is not None:
-                param.grad *= shock
+
     # step the optimizer and scaler if training in fp16
     scaler.step(optimizer)
     scaler.update()
