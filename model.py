@@ -124,15 +124,15 @@ class GPT(nn.Module):
         assert config.vocab_size is not None
         assert config.block_size is not None
         self.config = config
-        self.pad = 32
-        self.extra_emb = ((self.pad * 2))
+        self.pad = 16
+        self.extra_emb = ((self.pad * 2) * 2)
         r = config.n_embd - self.extra_emb
         # r = config.n_embd
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, r),
             wpe = nn.Embedding(config.block_size, r),
             eps_embs = nn.Embedding(config.vocab_size + 1, 2),
-            # eps_pos_embs = nn.Embedding(config.block_size, 4),
+            eps_pos_embs = nn.Embedding(config.block_size, 2),
             eps_drop = nn.Dropout(config.dropout),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
@@ -186,16 +186,16 @@ class GPT(nn.Module):
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
 
         xseq = F.pad(idx + 1, (self.pad, 0)).unfold(1, self.pad, 1)[:,:-1,:]
-        # bseq = F.pad(pos, (self.pad, 0)).unfold(0, self.pad, 1)[1:,:]
-        eps_embs = self.transformer.eps_embs(xseq).view(b, t, -1)
-        # eps_pos_embs = self.transformer.eps_pos_embs(bseq)
-        # eps_comb = torch.cat([
-        #     eps_embs.view(b, t, -1),
-        #     eps_pos_embs.view(1, t, -1).expand(b, t, -1)],
-        #     dim=-1,
-        # )
+        bseq = F.pad(pos, (self.pad, 0)).unfold(0, self.pad, 1)[1:,:]
+        eps_embs = self.transformer.eps_embs(xseq)
+        eps_pos_embs = self.transformer.eps_pos_embs(bseq)
+        eps_comb = torch.cat([
+            eps_embs.view(b, t, -1),
+            eps_pos_embs.view(1, t, -1).expand(b, t, -1)],
+            dim=-1,
+        )
         # eps_comb = self.transformer.eps_drop(eps_embs)
-        x = torch.cat([tok_emb + pos_emb, eps_embs], dim=1)
+        x = torch.cat([tok_emb + pos_emb, eps_comb], dim=1)
 
         # x = tok_emb + pos_emb
 
