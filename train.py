@@ -312,7 +312,9 @@ while True:
             if param.grad is not None:
                 param.grad *= factor
     if (max_iters // 2) <= iter_num:
-        shock = 1 + (1 - (losses['train'] / losses['val']))
+        shock = (1 - (losses['train'] / losses['val']))
+        if shock > 0.6:
+            shock = 0.1
         for param in model.parameters():
             if param.grad is not None:
                 param.grad *= shock
