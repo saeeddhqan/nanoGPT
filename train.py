@@ -304,8 +304,10 @@ while True:
     if grad_clip != 0.0:
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-    if (max_iters // 3) <= iter_num:
+    if (max_iters // 3) <= iter_num and (max_iters // 2) >= iter_num:
         factor = 1 + (0.1 * ratio)
+        shock = losses['train'] / losses['val']
+        factor += shock
         for param in model.parameters():
             if param.grad is not None:
                 param.grad *= factor
