@@ -308,7 +308,7 @@ while True:
         factor = 1 + (0.1 * ratio)
         for param in model.parameters():
             if param.grad is not None:
-                param.grad *= ratio
+                param.grad *= factor
     # step the optimizer and scaler if training in fp16
     scaler.step(optimizer)
     scaler.update()
