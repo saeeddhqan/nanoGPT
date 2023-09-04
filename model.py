@@ -89,7 +89,7 @@ class MLP(nn.Module):
         y = self.c_fc(x)
         y = self.gelu(y)
         y = self.c_proj(y)
-        x = (x * y) + self.bias(y)
+        x = (x * y) + self.bias
         x = self.dropout(x)
         return x
 
