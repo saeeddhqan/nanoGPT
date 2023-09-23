@@ -110,10 +110,7 @@ class CausalSelfAttention2(nn.Module):
         x = torch.cat((first_block, other_blocks), dim=2)
         return x
 
-    def forward(self,
-        x: Tensor,
-        y: Union[Tensor, None] = None,
-    ):
+    def forward(self,x,y):
         B, T, C = x.size()
         q, k, v  = self.c_attn(x).split(self.dim, dim=2)
         its_time = self.odd_even ^ ((self.idx + 1) % 2)
