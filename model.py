@@ -26,9 +26,9 @@ class LayerNorm(nn.Module):
     def forward(self, input):
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
 
-class CausalSelfAttention(nn.Module):
 
-    def __init__(self, config):
+class CausalSelfAttention(nn.Module):
+    def __init__(self, config, idxr):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         # key, query, value projections for all heads, but in a batch
@@ -43,7 +43,7 @@ class CausalSelfAttention(nn.Module):
         self.dropout = config.dropout
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
-        if not self.flash:
+        if not self.flash or True:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
@@ -66,7 +66,6 @@ class CausalSelfAttention(nn.Module):
             # manual implementation of attention
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
             att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-            att = att.masked_fill(self.bias[:,:,:T,:T] == 0, 0.0)
             att = F.softmax(att, dim=-1)
             att = self.attn_dropout(att)
             y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
@@ -75,6 +74,106 @@ class CausalSelfAttention(nn.Module):
         # output projection
         y = self.resid_dropout(self.c_proj(y))
         return y
+
+
+class CausalSelfAttention2(nn.Module):
+    def __init__(self, config, idx):
+        super().__init__()
+        assert config.n_embd % config.n_head == 0
+        self.idx = idx
+        self.dim = config.n_embd
+        self.n_heads = config.n_head
+        self.head_size = self.dim // self.n_heads
+
+        self.c_attn = nn.Linear(self.dim, 3 * self.dim, bias=config.bias)
+        self.c_proj = nn.Linear(self.dim, self.dim, bias=config.bias)
+        self.dropout = config.dropout
+        self.resid_dropout = nn.Dropout(self.dropout)
+        self.block_drop = nn.Dropout(self.dropout)
+
+        self.n_groups = 8
+
+        self.per_group = (config.block_size // self.n_groups)
+        self.odd_even = config.n_layers % 2
+
+    def do_att(self, q, k, v, g=False):
+        return torch.nn.functional.scaled_dot_product_attention(q, k, v, 
+                attn_mask=None,
+                # dropout_p=0,
+                dropout_p=config.dropout if (self.training and not g) else 0,
+                is_causal=True,
+            )
+
+    def do_block_merge(self, xblock, x):
+        other_blocks = torch.cat((xblock, x[:,:,1:,:]), dim=3)
+        first_block = torch.cat((x[:,:,:1], xblock[:,:,:1,-1:]), dim=3)
+        x = torch.cat((first_block, other_blocks), dim=2)
+        return x
+
+    def forward(self,
+        x: Tensor,
+        y: Union[Tensor, None] = None,
+    ):
+        B, T, C = x.size()
+        q, k, v  = self.c_attn(x).split(self.dim, dim=2)
+        its_time = self.odd_even ^ ((self.idx + 1) % 2)
+        n_groups = self.n_groups
+
+        if self.idx == 0 and T % self.per_group != 0 and T > self.per_group:
+            remain = self.per_group - (T % self.per_group) 
+            comp = remain * self.dim
+            T = T + remain
+            pad = torch.zeros(B, remain, q.size(2)).to(x.device)
+            q = torch.cat((q, pad), dim=1)
+            k = torch.cat((k, pad), dim=1)
+            v = torch.cat((v, pad), dim=1)
+            del pad, comp, remain
+
+        n_groups = min(T // self.per_group, self.n_groups)
+        q = q.view(B, T, self.n_heads, self.head_size).transpose(1, 2)
+        k = k.view(B, T, self.n_heads, self.head_size).transpose(1, 2)
+        v = v.view(B, T, self.n_heads, self.head_size).transpose(1, 2)
+        if n_groups > 1:
+            q = q.view(B, self.n_heads, n_groups, -1, self.head_size) # (B, nh, ng, gs, hs)
+            k = k.view(B, self.n_heads, n_groups, -1, self.head_size) # (B, nh, ng, gs, hs)
+            v = v.view(B, self.n_heads, n_groups, -1, self.head_size) # (B, nh, ng, gs, hs)
+            if its_time and q.size(2):
+                qblock = q.mean(dim=3).unsqueeze(3)
+                kblock = k.mean(dim=3).unsqueeze(3)
+                vblock = v.mean(dim=3).unsqueeze(3)
+                q = torch.cat((q, qblock), dim=3)
+                k = torch.cat((k, kblock), dim=3)
+                v = torch.cat((v, vblock), dim=3)
+            elif y is not None:
+                qblock, kblock, vblock = y
+                q = self.do_block_merge(qblock, q)
+                k = self.do_block_merge(qblock, k)
+                v = self.do_block_merge(vblock, v)
+            T += 1
+
+        x = self.do_att(q, k, v)
+        if x.dim() > 4 and its_time: # Try run block attentions in every layer.
+            # remove last block from q, k, v
+            q, k = q[:,:,:-1,-1], k[:,:,:-1,-1]
+            v = self.do_att(
+                q,
+                k,
+                x[:,:,:-1,-1:].view(B, self.n_heads, -1, self.head_size),
+                g=True,
+            ).unsqueeze(3)
+            y = (q.unsqueeze(3), k.unsqueeze(3), v)
+            x = x[:,:,:,:-1] # crop footprints(blocks)
+            T -= 1
+        else:
+            if not its_time and x.dim() > 4:
+                x = torch.cat((x[:,:,:1,:-1], x[:,:,1:,1:]), dim=2)
+                T -= 1
+            y = None
+        x = x.contiguous().view(B, self.n_heads, -1, x.size(-1))
+        x = x.transpose(1, 2).contiguous().view(B, T, C)
+        x = self.resid_dropout(self.c_proj(x))
+        return x, y
+
 
 class MLP(nn.Module):
 
@@ -94,17 +193,23 @@ class MLP(nn.Module):
 
 class Block(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, config, idx):
         super().__init__()
+        self.idx = idx
         self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
-        self.attn = CausalSelfAttention(config)
+        self.attn = CausalSelfAttention2(config, idx)
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
+        self.dropout = config.dropout
+        self.block_drop = nn.Dropout(self.dropout)
 
-    def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
-        x = x + self.mlp(self.ln_2(x))
-        return x
+    def forward(self, x, y):
+        if y is not None:
+            y = self.block_drop(y[0]), self.block_drop(y[1]), self.block_drop(y[2])
+        attout, y = self.attn(self.ln_1(x), y)
+        attout = x + attout
+        hid_stat = attout + self.mlp(self.ln_2(attout))
+        return hid_stat, y
 
 @dataclass
 class GPTConfig:
@@ -123,27 +228,17 @@ class GPT(nn.Module):
         assert config.vocab_size is not None
         assert config.block_size is not None
         self.config = config
-        # self.pad = 32
-        # self.extra_emb = ((self.pad * 2) * 2)
-        # r = config.n_embd - self.extra_emb
-        r = config.n_embd
+        self.dim = config.n_embd
+        self.pos_win = 8
+        self.dim_snip = self.dim // self.pos_win
         self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(config.vocab_size, r),
-            wpe = nn.Embedding(config.block_size, r),
-            # eps_embs = nn.Embedding(config.vocab_size + 1, 2),
-            # eps_pos_embs = nn.Embedding(config.block_size, 2),
-            # eps_drop = nn.Dropout(config.dropout),
+            wte = nn.Embedding(config.vocab_size, self.dim),
+            # wpe = nn.Embedding(config.block_size, self.dim),
             drop = nn.Dropout(config.dropout),
-            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+            h = nn.ModuleList([Block(config, idx) for idx in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        # with weight tying when using torch.compile() some warnings get generated:
-        # "UserWarning: functional_call was passed multiple values for tied weights.
-        # This behavior is deprecated and will be an error in future versions"
-        # not 100% sure what this is, so far seems to be harmless. TODO investigate
-        # self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
-
         # init all weights
         self.apply(self._init_weights)
         # apply special scaled init to the residual projections, per GPT-2 paper
@@ -154,13 +249,7 @@ class GPT(nn.Module):
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
 
-    def get_num_params(self, non_embedding=True):
-        """
-        Return the number of parameters in the model.
-        For non-embedding count (default), the position embeddings get subtracted.
-        The token embeddings would too, except due to the parameter sharing these
-        params are actually used as weights in the final layer, so we include them.
-        """
+    def get_num_params(self, non_embedding=False):
         n_params = sum(p.numel() for p in self.parameters())
         if non_embedding:
             n_params -= self.transformer.wpe.weight.numel()
@@ -182,25 +271,21 @@ class GPT(nn.Module):
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
-        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
 
-        # xseq = F.pad(idx + 1, (self.pad, 0)).unfold(1, self.pad, 1)[:,:-1,:]
-        # bseq = F.pad(pos, (self.pad, 0)).unfold(0, self.pad, 1)[1:,:]
-        # eps_embs = self.transformer.eps_embs(xseq)
-        # eps_pos_embs = self.transformer.eps_pos_embs(bseq)
-        # eps_comb = torch.cat([
-        #     eps_embs.view(b, t, -1),
-        #     eps_pos_embs.view(1, t, -1).expand(b, t, -1)],
-        #     dim=-1,
-        # )
-        # # eps_comb = self.transformer.eps_drop(eps_embs)
-        # x = torch.cat([tok_emb + pos_emb, eps_comb], dim=-1)
+        snip = tok_emb[:,:,:self.dim_snip].flatten(1)
+        snip_pad = F.pad(snip, (self.dim - self.dim_snip, 0), value=0)
+        pos_emb = self.stack.dropout_pos(
+            snip_pad.unfold(1, self.dim, self.dim_snip) * self.pos_lin,
+        )
+
+        # pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
 
         x = tok_emb + pos_emb
 
         x = self.transformer.drop(x)
-        for block in self.transformer.h:
-            x = block(x)
+        y = None
+        for i, block in enumerate(self.transformer.h):
+            x, y = block(x)
         x = self.transformer.ln_f(x)
 
         if targets is not None:
@@ -215,9 +300,6 @@ class GPT(nn.Module):
         return logits, loss
 
     def crop_block_size(self, block_size):
-        # model surgery to decrease the block size if necessary
-        # e.g. we may load the GPT2 pretrained model checkpoint (block size 1024)
-        # but want to use a smaller block size for some smaller, simpler model
         assert block_size <= self.config.block_size
         self.config.block_size = block_size
         self.transformer.wpe.weight = nn.Parameter(self.transformer.wpe.weight[:block_size])
@@ -309,9 +391,6 @@ class GPT(nn.Module):
         return optimizer
 
     def estimate_mfu(self, fwdbwd_per_iter, dt):
-        """ estimate model flops utilization (MFU) in units of A100 bfloat16 peak FLOPS """
-        # first estimate the number of flops we do per iteration.
-        # see PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
         N = self.get_num_params()
         cfg = self.config
         L, H, Q, T = cfg.n_layer, cfg.n_head, cfg.n_embd//cfg.n_head, cfg.block_size
@@ -326,11 +405,7 @@ class GPT(nn.Module):
 
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
-        """
-        Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
-        the sequence max_new_tokens times, feeding the predictions back into the model each time.
-        Most likely you'll want to make sure to be in model.eval() mode of operation for this.
-        """
+
         for _ in range(max_new_tokens):
             # if the sequence context is growing too long we must crop it at block_size
             idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
