@@ -87,8 +87,8 @@ class CausalSelfAttention2(nn.Module):
         self.dim = config.n_embd
         self.nheads = config.n_head
         self.hsize = self.dim // self.nheads
-        self.v_attn = nn.Linear(self.dim, self.dim, bias=config.bias)
-        self.c_attn = nn.Linear(self.dim, 2 * self.dim, bias=config.bias)
+        # self.v_attn = nn.Linear(self.dim, self.dim, bias=config.bias)
+        self.c_attn = nn.Linear(self.dim, 3 * self.dim, bias=config.bias)
         self.c_proj = nn.Linear(self.dim, self.dim, bias=config.bias)
         self.dropout = config.dropout
         self.resid_dropout = nn.Dropout(self.dropout)
@@ -119,8 +119,8 @@ class CausalSelfAttention2(nn.Module):
     ):
         B, T, C = x.size()
         n_groups = min(T // self.group_t, self.n_groups)
-        v = F.silu(self.v_attn(x))
-        q, k  = self.c_attn(v).split(self.dim, dim=2)
+        # v = F.silu(self.v_attn(x))
+        q, k, v  = self.c_attn(x).split(self.dim, dim=2)
 
         # change shape (B, T, C) to (B, nh, ng, pg, C)
         q = q.view(B, n_groups, self.group_t, self.nheads, self.hsize).permute(0, 3, 1, 2, 4)
@@ -143,7 +143,7 @@ class CausalSelfAttention2(nn.Module):
                 q,
                 k,
                 x[:,:,:-1,-1],
-                group=True,
+                group=False,
             ).unsqueeze(3)
             y = (q.unsqueeze(3), k.unsqueeze(3), v)
             x = x[:,:,:,:-1] # crop footprints(blocks)
@@ -177,15 +177,16 @@ class MLP(nn.Module):
 
 #   def __init__(self, config):
 #       super().__init__()
-#       self.w1    = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
-#       self.w2    = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
-#       self.w3    = nn.Linear(3 * config.n_embd, config.n_embd, bias=config.bias)
-#       self.wb    = nn.Linear(3 * config.n_embd, config.n_embd, bias=config.bias)
+#       self.dim = config.n_embd
+#       self.w1    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+#       self.w2    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+#       self.w3    = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+#       # self.wb    = nn.Linear(config.n_embd, 2 * config.n_embd, bias=config.bias)
 #       self.dropout = nn.Dropout(config.dropout)
 
 #   def forward(self, x):
-#       w, b = self.wb(x).split(self.dim, dim=2)
-#       x = (w * x) + b
+#       # w, b = self.wb(x).split(self.dim, dim=2)
+#       # x = (w * x) + b
 #       return self.dropout(self.w3(F.silu(self.w1(x)) * self.w2(x)))
 
 
@@ -202,10 +203,10 @@ class Block(nn.Module):
         self.block_drop = nn.Dropout(self.dropout)
 
     def forward(self, x, y):
-        if y is not None:
-            y = self.block_drop(y[0]), self.block_drop(y[1]), self.block_drop(y[2])
-        attout, y = self.attn(self.ln_1(x), y)
-        # attout = self.attn(self.ln_1(x))
+        # if y is not None:
+        #     y = self.block_drop(y[0]), self.block_drop(y[1]), self.block_drop(y[2])
+        # attout, y = self.attn(self.ln_1(x), y)
+        attout = self.attn(self.ln_1(x))
         attout = x + attout
         hid_stat = attout + self.mlp(self.ln_2(attout))
         return hid_stat, y
@@ -228,13 +229,13 @@ class GPT(nn.Module):
         assert config.block_size is not None
         self.config = config
         self.dim = config.n_embd
-        self.pos_win = 32
+        self.pos_win = 8
         self.dim_snip = self.dim // self.pos_win
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, self.dim),
             wpe = nn.Embedding(config.block_size, self.dim),
             drop = nn.Dropout(config.dropout),
-            # dropout_pos = nn.Dropout(0.4),
+            # dropout_pos = nn.Dropout(0.2),
             h = nn.ModuleList([Block(config, idx) for idx in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))

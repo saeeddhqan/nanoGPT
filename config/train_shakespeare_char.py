@@ -20,18 +20,19 @@ block_size = 256 # context of up to 256 previous characters
 
 # baby GPT model :)
 n_layer = 4
-n_head = 6
-n_embd = 384
+n_head = 4
+n_embd = 320
 dropout = 0.3
-wandb_run_name = f'mini-gpt-linearRegular-{n_layer}-{n_head}-{n_embd}-{dropout}'
+
 learning_rate = 1e-3 # with baby networks can afford to go a bit higher
 max_iters = 5000
 lr_decay_iters = 5000 # make equal to max_iters usually
 min_lr = 1e-4 # learning_rate / 10 usually
 beta2 = 0.99 # make a bit bigger because number of tokens per iter is small
-
+n_groups = 8
+pos_win = 0
 warmup_iters = 100 # not super necessary potentially
-
+wandb_run_name = f'group-{n_layer}nl-{n_head}nh-{n_embd}d-{dropout}do-{n_groups}ng-{pos_win}w'
 # on macbook also add
 # device = 'cpu'  # run on cpu only
-compile = False # do not torch compile the model
+# compile = False # do not torch compile the model
