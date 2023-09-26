@@ -84,8 +84,8 @@ class CausalSelfAttention2(nn.Module):
 		self.dim = config.n_embd
 		self.n_heads = config.n_head
 		self.head_size = self.dim // self.n_heads
-
-		self.c_attn = nn.Linear(self.dim, 3 * self.dim, bias=config.bias)
+		self.v_attn = nn.Linear(self.dim, self.dim, bias=config.bias)
+		self.c_attn = nn.Linear(self.dim, 2 * self.dim, bias=config.bias)
 		self.c_proj = nn.Linear(self.dim, self.dim, bias=config.bias)
 		self.dropout = config.dropout
 		self.resid_dropout = nn.Dropout(self.dropout)
