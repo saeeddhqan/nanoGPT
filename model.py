@@ -8,6 +8,7 @@ https://github.com/huggingface/transformers/blob/main/src/transformers/models/gp
 """
 
 from torch import Tensor
+from typing import NoReturn, ClassVar, Union, Optional
 
 import math
 import inspect
